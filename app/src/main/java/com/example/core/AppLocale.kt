@@ -96,7 +96,17 @@ data class CoreStrings(
     val filePathLabel: String,
     val languageLabel: String,
     val stackTraceLabel: String,
-    val fileTooLargeError: String
+    val fileTooLargeError: String,
+    val recordAudio: String,
+    val stopRecording: String,
+    val recordingInProgress: String,
+    val micPermissionRationale: String,
+    val micPermissionDenied: String,
+    val openSettings: String,
+    val grantPermission: String,
+    val copyError: String,
+    val authSignInFailedPrefix: String,
+    val authCancelledHint: String
 )
 
 val ArabicStrings = CoreStrings(
@@ -185,7 +195,17 @@ val ArabicStrings = CoreStrings(
     filePathLabel = "مسار الملف (مثال: src/Main.kt)",
     languageLabel = "لغة البرمجة",
     stackTraceLabel = "سجل الخطأ (Stacktrace) — اختياري",
-    fileTooLargeError = "حجم الملف يتجاوز حد 20 ميجابايت للوسائط المضمنة."
+    fileTooLargeError = "حجم الملف يتجاوز حد 20 ميجابايت للوسائط المضمنة.",
+    recordAudio = "تسجيل صوت",
+    stopRecording = "إيقاف",
+    recordingInProgress = "جارٍ التسجيل الصوتي...",
+    micPermissionRationale = "يحتاج التطبيق إذن الميكروفون لتسجيل الرسائل الصوتية وتحليلها عبر Mooazb AI.",
+    micPermissionDenied = "تم رفض إذن الميكروفون. يمكنك منحه من إعدادات التطبيق لتسجيل الصوت.",
+    openSettings = "إعدادات التطبيق",
+    grantPermission = "منح الإذن",
+    copyError = "نسخ التفاصيل",
+    authSignInFailedPrefix = "تعذر إتمام تسجيل الدخول عبر Google",
+    authCancelledHint = "إذا اخترت حساباً ثم عادت الشاشة دون تسجيل الدخول، تأكد من تطابق بصمة SHA-1 في Firebase Console مع بصمة التطبيق:"
 )
 
 val EnglishStrings = CoreStrings(
@@ -274,7 +294,17 @@ val EnglishStrings = CoreStrings(
     filePathLabel = "File Path (e.g. src/Main.kt)",
     languageLabel = "Language",
     stackTraceLabel = "Error / Stacktrace (optional)",
-    fileTooLargeError = "File exceeds the 20MB inline media payload limit."
+    fileTooLargeError = "File exceeds the 20MB inline media payload limit.",
+    recordAudio = "Voice Note",
+    stopRecording = "Stop",
+    recordingInProgress = "Recording voice note...",
+    micPermissionRationale = "Microphone permission is required to record voice prompts for Mooazb AI.",
+    micPermissionDenied = "Microphone permission was denied. Enable it in App Settings to record voice notes.",
+    openSettings = "App Settings",
+    grantPermission = "Allow",
+    copyError = "Copy Details",
+    authSignInFailedPrefix = "Google Sign-In did not complete",
+    authCancelledHint = "If you picked an account and returned here without signing in, verify this app SHA-1 is registered in Firebase Console:"
 )
 
 val LocalCoreStrings = staticCompositionLocalOf { ArabicStrings }

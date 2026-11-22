@@ -1,26 +1,35 @@
 package com.example
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.core.app.ApplicationProvider
 import com.example.core.AppLanguage
 import com.example.core.ArabicStrings
 import com.example.core.EnglishStrings
+import com.example.core.LocalAppLanguage
+import com.example.core.LocalCoreStrings
 import com.example.domain.ReasoningLevel
+import com.example.ui.auth.AuthScreen
 import com.example.ui.components.ReasoningTierSegmentedControl
 import com.example.ui.theme.CoreMindTheme
 import com.example.ui.theme.LocalCyberPalette
 import com.example.ui.theme.cyberPaletteForTier
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -119,5 +128,50 @@ class ExampleRobolectricTest {
             cyberPaletteForTier(ReasoningLevel.LOW).accent,
             observedPrimary
         )
+    }
+
+    @Test
+    fun `manifest declares microphone permission without broad storage permissions`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        @Suppress("DEPRECATION")
+        val pkgInfo = context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.GET_PERMISSIONS
+        )
+        val permissions = pkgInfo.requestedPermissions?.toSet().orEmpty()
+        assertTrue(permissions.contains(Manifest.permission.INTERNET))
+        assertTrue(permissions.contains(Manifest.permission.ACCESS_NETWORK_STATE))
+        assertTrue(permissions.contains(Manifest.permission.RECORD_AUDIO))
+        assertFalse(permissions.contains("android.permission.READ_EXTERNAL_STORAGE"))
+        assertFalse(permissions.contains("android.permission.READ_MEDIA_IMAGES"))
+        assertFalse(permissions.contains("android.permission.READ_MEDIA_VIDEO"))
+    }
+
+    @Test
+    fun `auth screen displays diagnostic error banner with copy action when sign-in fails`() {
+        val diagnostic = "[GetCredentialCancellationException] SHA-1 mismatch\nSHA-1: 51:8D:04:1F"
+        composeTestRule.setContent {
+            CoreMindTheme {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    LocalAppLanguage provides AppLanguage.AR,
+                    LocalCoreStrings provides ArabicStrings
+                ) {
+                    AuthScreen(
+                        onToggleLanguage = {},
+                        onAuthSuccess = {},
+                        initialErrorMessage = diagnostic
+                    )
+                }
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("engine_error_banner").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("error_banner_copy_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("51:8D:04:1F", substring = true).assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("error_banner_dismiss_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("engine_error_banner").assertDoesNotExist()
     }
 }

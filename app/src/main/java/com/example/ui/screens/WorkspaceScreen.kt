@@ -1,12 +1,22 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.media.MediaRecorder
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -31,12 +41,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -51,6 +64,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,13 +99,17 @@ import com.example.ui.components.ReasoningTierSegmentedControl
 import com.example.ui.components.TokenCapacityGauge
 import com.example.ui.components.reasoningAccentColor
 import com.example.ui.theme.ComputeAmber
+import com.example.ui.theme.CrimsonAlert
 import com.example.ui.theme.DeepAmberContainer
+import com.example.ui.theme.DeepCrimsonContainer
 import com.example.ui.theme.LocalCyberPalette
 import com.example.ui.theme.SecurityEmerald
 import com.example.ui.viewmodel.WorkspaceViewModel
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -117,8 +135,140 @@ fun WorkspaceScreen(
 
     var promptText by rememberSaveable { mutableStateOf("") }
     var localPickerError by remember { mutableStateOf<String?>(null) }
+    var isRecording by remember { mutableStateOf(false) }
+    var recordingSeconds by remember { mutableStateOf(0) }
+    var showMicRationale by remember { mutableStateOf(false) }
+    var micDeniedPermanently by remember { mutableStateOf(false) }
+    var activeRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var activeAudioFile by remember { mutableStateOf<File?>(null) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+
+    fun releaseRecorderSafely() {
+        try {
+            activeRecorder?.apply {
+                try {
+                    stop()
+                } catch (_: Exception) {
+                }
+                reset()
+                release()
+            }
+        } catch (_: Exception) {
+        } finally {
+            activeRecorder = null
+        }
+    }
+
+    fun startVoiceRecording() {
+        localPickerError = null
+        showMicRationale = false
+        try {
+            val outFile = File(context.cacheDir, "voice_${System.currentTimeMillis()}.m4a")
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+            recorder.apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioEncodingBitRate(96_000)
+                setAudioSamplingRate(44_100)
+                setOutputFile(outFile.absolutePath)
+                prepare()
+                start()
+            }
+            activeAudioFile = outFile
+            activeRecorder = recorder
+            recordingSeconds = 0
+            isRecording = true
+        } catch (e: Exception) {
+            releaseRecorderSafely()
+            activeAudioFile?.delete()
+            activeAudioFile = null
+            isRecording = false
+            localPickerError = e.localizedMessage ?: strings.micPermissionDenied
+        }
+    }
+
+    fun stopAndAttachVoiceRecording() {
+        val outFile = activeAudioFile
+        val durationSec = recordingSeconds.coerceAtLeast(1)
+        isRecording = false
+        releaseRecorderSafely()
+        activeAudioFile = null
+        if (outFile == null || !outFile.exists()) return
+        coroutineScope.launch {
+            val attachmentResult = withContext(Dispatchers.IO) {
+                try {
+                    val bytes = outFile.readBytes()
+                    outFile.delete()
+                    if (bytes.isEmpty()) {
+                        Result.failure(IllegalStateException("Recorded audio is empty."))
+                    } else if (bytes.size.toLong() > MAX_ATTACHMENT_BYTES) {
+                        Result.failure(IllegalArgumentException(strings.fileTooLargeError))
+                    } else {
+                        Result.success(
+                            ContextAttachment(
+                                id = UUID.randomUUID().toString(),
+                                name = "voice_${durationSec}s.m4a",
+                                mimeType = "audio/mp4",
+                                sizeBytes = bytes.size.toLong(),
+                                estimatedTokens = (durationSec * 32L).coerceAtLeast(64L),
+                                mediaBytes = bytes
+                            )
+                        )
+                    }
+                } catch (e: Exception) {
+                    outFile.delete()
+                    Result.failure(e)
+                }
+            }
+            attachmentResult
+                .onSuccess { viewModel.addAttachment(it) }
+                .onFailure { localPickerError = it.message }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            releaseRecorderSafely()
+            activeAudioFile?.delete()
+        }
+    }
+
+    LaunchedEffect(isRecording) {
+        while (isRecording) {
+            delay(1000L)
+            recordingSeconds += 1
+            if (recordingSeconds >= 120) {
+                stopAndAttachVoiceRecording()
+            }
+        }
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            micDeniedPermanently = false
+            showMicRationale = false
+            startVoiceRecording()
+        } else {
+            val activity = context.findActivity()
+            val shouldShowRationale = activity != null &&
+                ActivityCompat.shouldShowRequestPermissionRationale(
+                    activity,
+                    Manifest.permission.RECORD_AUDIO
+                )
+            micDeniedPermanently = !shouldShowRationale
+            showMicRationale = false
+            localPickerError = strings.micPermissionDenied
+        }
+    }
 
     val mediaPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -215,10 +365,59 @@ fun WorkspaceScreen(
                 }
             }
 
+            if (showMicRationale) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("mic_permission_rationale_banner"),
+                    shape = RoundedCornerShape(12.dp),
+                    color = DeepAmberContainer.copy(alpha = 0.72f),
+                    border = BorderStroke(1.dp, ComputeAmber.copy(alpha = 0.75f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = strings.micPermissionRationale,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(onClick = { showMicRationale = false }) {
+                                Text(strings.cancel)
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    showMicRationale = false
+                                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                },
+                                border = BorderStroke(1.dp, cyber.accent),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = cyber.accent)
+                            ) {
+                                Text(strings.grantPermission)
+                            }
+                        }
+                    }
+                }
+            }
+
             localPickerError?.let { err ->
                 EngineErrorBanner(
                     message = err,
-                    onDismiss = { localPickerError = null }
+                    extraActionLabel = if (micDeniedPermanently) strings.openSettings else null,
+                    onExtraAction = if (micDeniedPermanently) {
+                        { openAppPermissionSettings(context) }
+                    } else null,
+                    onDismiss = {
+                        localPickerError = null
+                        micDeniedPermanently = false
+                    }
                 )
             }
 
@@ -321,7 +520,9 @@ fun WorkspaceScreen(
             ) {
                 Column(modifier = Modifier.padding(10.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -331,7 +532,9 @@ fun WorkspaceScreen(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                                 )
                             },
-                            modifier = Modifier.testTag("attach_media_button"),
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("attach_media_button"),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                         ) {
                             Icon(Icons.Outlined.PhotoLibrary, contentDescription = strings.attachMedia, modifier = Modifier.size(16.dp))
@@ -342,12 +545,63 @@ fun WorkspaceScreen(
                             onClick = {
                                 documentPicker.launch(arrayOf("text/*", "application/json", "application/pdf", "audio/*", "video/*"))
                             },
-                            modifier = Modifier.testTag("attach_doc_button"),
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("attach_doc_button"),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                         ) {
                             Icon(Icons.Outlined.AttachFile, contentDescription = strings.attachDocument, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(strings.attachDocument, style = MaterialTheme.typography.labelLarge)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                if (isRecording) {
+                                    stopAndAttachVoiceRecording()
+                                } else {
+                                    val hasPermission = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.RECORD_AUDIO
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    if (hasPermission) {
+                                        startVoiceRecording()
+                                    } else {
+                                        val activity = context.findActivity()
+                                        if (activity != null && ActivityCompat.shouldShowRequestPermissionRationale(
+                                                activity,
+                                                Manifest.permission.RECORD_AUDIO
+                                            ) && !showMicRationale
+                                        ) {
+                                            showMicRationale = true
+                                        } else {
+                                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("record_audio_button"),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isRecording) CrimsonAlert else cyber.border
+                            ),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (isRecording) DeepCrimsonContainer else Color.Transparent,
+                                contentColor = if (isRecording) CrimsonAlert else cyber.accent
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
+                                contentDescription = if (isRecording) strings.stopRecording else strings.recordAudio,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (isRecording) "${strings.stopRecording} (${recordingSeconds}s)" else strings.recordAudio,
+                                style = MaterialTheme.typography.labelLarge
+                            )
                         }
                     }
 
@@ -670,4 +924,20 @@ private suspend fun readUriAsAttachment(
     } catch (e: Exception) {
         Result.failure(e)
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+private fun openAppPermissionSettings(context: Context) {
+    val intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.fromParts("package", context.packageName, null)
+    ).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(intent)
 }

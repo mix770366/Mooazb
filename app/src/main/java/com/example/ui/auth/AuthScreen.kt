@@ -3,6 +3,8 @@ package com.example.ui.auth
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -59,9 +61,10 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
 import com.example.R
-import com.example.core.AppLanguage
+import com.example.core.CoreStrings
 import com.example.core.LocalAppLanguage
 import com.example.core.LocalCoreStrings
 import com.example.ui.components.EngineErrorBanner
@@ -76,8 +79,13 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuthException
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
+import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -89,12 +97,25 @@ private const val TAG = "Auth"
 fun attemptAutoSignIn(
     context: Context,
     credentialManager: CredentialManager,
-    onAuthSuccess: () -> Unit,
+    onAuthSuccess: (FirebaseUser?) -> Unit,
     onUnauthenticated: () -> Unit,
     scope: CoroutineScope
 ) {
-    if (Firebase.auth.currentUser != null) {
-        onAuthSuccess()
+    val hasFirebaseApp = try {
+        if (FirebaseApp.getApps(context).isEmpty()) {
+            FirebaseApp.initializeApp(context) != null
+        } else {
+            true
+        }
+    } catch (_: Exception) {
+        false
+    }
+    if (!hasFirebaseApp) {
+        onUnauthenticated()
+        return
+    }
+    Firebase.auth.currentUser?.let { existing ->
+        onAuthSuccess(existing)
         return
     }
     val clientId = resolveDefaultWebClientId(context)
@@ -116,14 +137,24 @@ fun attemptAutoSignIn(
             val cred = credentialManager.getCredential(activityContext, request).credential
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
-                Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
-                onAuthSuccess()
+                val authResult = Firebase.auth.signInWithCredential(
+                    GoogleAuthProvider.getCredential(token, null)
+                ).await()
+                val user = authResult.user ?: Firebase.auth.currentUser
+                if (user != null) {
+                    onAuthSuccess(user)
+                } else {
+                    onUnauthenticated()
+                }
             } else {
                 onUnauthenticated()
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: NoCredentialException) {
             onUnauthenticated()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Silent auto sign-in skipped: ${e::class.simpleName}: ${e.message}")
             onUnauthenticated()
         }
     }
@@ -150,17 +181,72 @@ private fun resolveDefaultWebClientId(context: Context): String? {
     }
 }
 
+private fun getAppSigningSha1(context: Context): String? {
+    return try {
+        val pm = context.packageManager
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val info = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+            val signingInfo = info.signingInfo ?: return null
+            if (signingInfo.hasMultipleSigners()) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo.signingCertificateHistory
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES).signatures
+        }
+        val certBytes = signatures?.firstOrNull()?.toByteArray() ?: return null
+        val digest = MessageDigest.getInstance("SHA-1").digest(certBytes)
+        digest.joinToString(":") { "%02X".format(it) }
+    } catch (e: Exception) {
+        Log.w(TAG, "Unable to read signing SHA-1: ${e.message}")
+        null
+    }
+}
+
+private fun buildDiagnosticError(
+    type: String,
+    detail: String,
+    sha1: String?
+): String = buildString {
+    append("[$type] ")
+    append(detail)
+    if (!sha1.isNullOrBlank()) {
+        append("\nSHA-1: ")
+        append(sha1)
+    }
+}
+
 fun onGoogleSignInClicked(
     context: Context,
     credentialManager: CredentialManager,
-    onAuthSuccess: () -> Unit,
+    strings: CoreStrings,
+    onAuthSuccess: (FirebaseUser?) -> Unit,
     onAuthError: (String) -> Unit,
-    scope: CoroutineScope,
-    onAuthCancelled: () -> Unit = {}
+    scope: CoroutineScope
 ) {
     val clientId = resolveDefaultWebClientId(context)
     if (clientId == null) {
-        onAuthError("Google Sign-In configuration missing: default_web_client_id not found")
+        onAuthError("Google Sign-In configuration missing: default_web_client_id not found in resources.")
+        return
+    }
+    val hasFirebaseApp = try {
+        if (FirebaseApp.getApps(context).isEmpty()) {
+            FirebaseApp.initializeApp(context) != null
+        } else {
+            true
+        }
+    } catch (_: Exception) {
+        false
+    }
+    if (!hasFirebaseApp) {
+        onAuthError("FirebaseApp is not initialized. Verify app/google-services.json is configured.")
+        return
+    }
+    val activityContext = context.findActivity()
+    if (activityContext == null) {
+        onAuthError("Google Sign-In requires an active Activity context.")
         return
     }
     val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
@@ -169,24 +255,62 @@ fun onGoogleSignInClicked(
         .build()
     scope.launch {
         try {
-            val activityContext = context.findActivity() ?: context
             val cred = credentialManager.getCredential(activityContext, request).credential
             if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
-                Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
-                onAuthSuccess()
+                val authResult = Firebase.auth.signInWithCredential(
+                    GoogleAuthProvider.getCredential(token, null)
+                ).await()
+                val signedInUser = authResult.user ?: Firebase.auth.currentUser
+                if (signedInUser != null) {
+                    onAuthSuccess(signedInUser)
+                } else {
+                    onAuthError("Firebase Auth completed without returning a user session.")
+                }
             } else {
-                onAuthError("Unexpected credential type")
+                onAuthError("Unexpected credential type: ${cred.type}")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: GetCredentialCancellationException) {
             Log.w(TAG, "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
-            onAuthCancelled()
+            val sha1 = getAppSigningSha1(context)
+            val detail = e.errorMessage?.toString()?.takeIf { it.isNotBlank() }
+                ?: e.message?.takeIf { it.isNotBlank() }
+                ?: "Cancelled or rejected by Google Play Services"
+            val msg = buildString {
+                append("${strings.authSignInFailedPrefix} ($detail).")
+                append("\n${strings.authCancelledHint}")
+                if (!sha1.isNullOrBlank()) {
+                    append("\nSHA-1: ")
+                    append(sha1)
+                }
+            }
+            onAuthError(msg)
         } catch (e: NoCredentialException) {
             Log.w(TAG, "No Google credential available on device: ${e.message}", e)
-            onAuthError("No Google account found on this device. Please add a Google account in device Settings and try again.")
+            val sha1 = getAppSigningSha1(context)
+            val detail = e.errorMessage?.toString()?.takeIf { it.isNotBlank() }
+                ?: "No Google account credential found on this device. Please add a Google account in device Settings and try again."
+            onAuthError(buildDiagnosticError("NoCredentialException", detail, sha1))
+        } catch (e: GetCredentialException) {
+            Log.e(TAG, "Credential Manager error during Google Sign-In", e)
+            val sha1 = getAppSigningSha1(context)
+            val detail = e.errorMessage?.toString()?.takeIf { it.isNotBlank() }
+                ?: e.localizedMessage
+                ?: e.message
+                ?: "Credential Manager error"
+            onAuthError(buildDiagnosticError(e::class.simpleName ?: "GetCredentialException", detail, sha1))
+        } catch (e: FirebaseAuthException) {
+            Log.e(TAG, "Firebase Auth signInWithCredential failed (${e.errorCode})", e)
+            val sha1 = getAppSigningSha1(context)
+            val detail = "${e.errorCode}: ${e.localizedMessage ?: e.message ?: "Firebase Authentication failed"}"
+            onAuthError(buildDiagnosticError("FirebaseAuthException", detail, sha1))
         } catch (e: Exception) {
             Log.e(TAG, "Google Sign-In failed", e)
-            onAuthError(e.localizedMessage ?: "Sign in failed")
+            val sha1 = getAppSigningSha1(context)
+            val detail = e.localizedMessage ?: e.message ?: "Sign in failed"
+            onAuthError(buildDiagnosticError(e::class.simpleName ?: "AuthException", detail, sha1))
         }
     }
 }
@@ -213,7 +337,8 @@ fun signOutUser(
 @Composable
 fun AuthScreen(
     onToggleLanguage: () -> Unit,
-    onAuthSuccess: () -> Unit
+    onAuthSuccess: (FirebaseUser?) -> Unit,
+    initialErrorMessage: String? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -222,7 +347,8 @@ fun AuthScreen(
     val currentLanguage = LocalAppLanguage.current
 
     var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember(initialErrorMessage) { mutableStateOf(initialErrorMessage) }
+    val scrollState = rememberScrollState()
 
     LaunchedEffect(Unit) {
         attemptAutoSignIn(
@@ -232,6 +358,12 @@ fun AuthScreen(
             onUnauthenticated = {},
             scope = scope
         )
+    }
+
+    LaunchedEffect(errorMessage) {
+        if (!errorMessage.isNullOrBlank()) {
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
     }
 
     Box(
@@ -253,7 +385,7 @@ fun AuthScreen(
             modifier = Modifier
                 .widthIn(max = 540.dp)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             Row(
@@ -339,6 +471,7 @@ fun AuthScreen(
             errorMessage?.let { msg ->
                 EngineErrorBanner(
                     message = msg,
+                    showCopyAction = true,
                     onDismiss = { errorMessage = null }
                 )
             }
@@ -350,18 +483,16 @@ fun AuthScreen(
                     onGoogleSignInClicked(
                         context = context,
                         credentialManager = credentialManager,
-                        onAuthSuccess = {
+                        strings = strings,
+                        onAuthSuccess = { user ->
                             isLoading = false
-                            onAuthSuccess()
+                            onAuthSuccess(user)
                         },
                         onAuthError = { err ->
                             isLoading = false
                             errorMessage = err
                         },
-                        scope = scope,
-                        onAuthCancelled = {
-                            isLoading = false
-                        }
+                        scope = scope
                     )
                 },
                 enabled = !isLoading,

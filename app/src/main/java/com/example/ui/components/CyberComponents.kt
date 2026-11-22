@@ -517,13 +517,19 @@ fun EngineErrorBanner(
     message: String,
     isXHighBillingIssue: Boolean = false,
     onFallbackToHigh: (() -> Unit)? = null,
+    showCopyAction: Boolean = false,
+    extraActionLabel: String? = null,
+    onExtraAction: (() -> Unit)? = null,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val strings = LocalCoreStrings.current
     AnimatedVisibility(visible = message.isNotBlank()) {
         Surface(
-            modifier = modifier.fillMaxWidth(),
+            modifier = modifier
+                .fillMaxWidth()
+                .testTag("engine_error_banner"),
             shape = RoundedCornerShape(14.dp),
             color = DeepCrimsonContainer,
             border = BorderStroke(1.dp, CrimsonAlert.copy(alpha = 0.7f))
@@ -559,10 +565,40 @@ fun EngineErrorBanner(
                     }
                 }
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (showCopyAction) {
+                        TextButton(
+                            onClick = {
+                                copyToClipboard(context, "Error", message, strings.copiedToast)
+                            },
+                            modifier = Modifier.testTag("error_banner_copy_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = strings.copyError,
+                                tint = ElectricCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(strings.copyError, color = ElectricCyan)
+                        }
+                    }
+                    if (!extraActionLabel.isNullOrBlank() && onExtraAction != null) {
+                        OutlinedButton(
+                            onClick = onExtraAction,
+                            border = BorderStroke(1.dp, ElectricCyan),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = ElectricCyan),
+                            modifier = Modifier.testTag("error_banner_extra_action")
+                        ) {
+                            Text(extraActionLabel)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                    }
                     if (isXHighBillingIssue && onFallbackToHigh != null) {
                         OutlinedButton(
                             onClick = onFallbackToHigh,
@@ -573,7 +609,10 @@ fun EngineErrorBanner(
                         }
                         Spacer(Modifier.width(8.dp))
                     }
-                    TextButton(onClick = onDismiss) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("error_banner_dismiss_button")
+                    ) {
                         Text(strings.close, color = CrimsonAlert)
                     }
                 }

@@ -57,6 +57,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -138,7 +139,12 @@ fun CoreMindApp(auth: FirebaseAuth = Firebase.auth) {
     var language by rememberSaveable { mutableStateOf(AppLanguage.AR) }
     val strings = if (language == AppLanguage.AR) ArabicStrings else EnglishStrings
 
-    val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+    val authStateUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+    var currentUser by remember { mutableStateOf(auth.currentUser) }
+
+    LaunchedEffect(authStateUser) {
+        currentUser = authStateUser
+    }
 
     CoreMindTheme {
         CompositionLocalProvider(
@@ -152,7 +158,9 @@ fun CoreMindApp(auth: FirebaseAuth = Firebase.auth) {
                     onToggleLanguage = {
                         language = if (language == AppLanguage.AR) AppLanguage.EN else AppLanguage.AR
                     },
-                    onAuthSuccess = {}
+                    onAuthSuccess = { signedIn ->
+                        currentUser = signedIn ?: auth.currentUser
+                    }
                 )
             } else {
                 key(user.uid) {
@@ -160,6 +168,9 @@ fun CoreMindApp(auth: FirebaseAuth = Firebase.auth) {
                         user = user,
                         onToggleLanguage = {
                             language = if (language == AppLanguage.AR) AppLanguage.EN else AppLanguage.AR
+                        },
+                        onSignedOut = {
+                            currentUser = null
                         }
                     )
                 }
@@ -172,7 +183,8 @@ fun CoreMindApp(auth: FirebaseAuth = Firebase.auth) {
 @Composable
 private fun AuthenticatedCoreShell(
     user: FirebaseUser,
-    onToggleLanguage: () -> Unit
+    onToggleLanguage: () -> Unit,
+    onSignedOut: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -490,7 +502,11 @@ private fun AuthenticatedCoreShell(
                     Button(
                         onClick = {
                             showAccountDialog = false
-                            signOutUser(credentialManager = credentialManager, scope = scope)
+                            signOutUser(
+                                credentialManager = credentialManager,
+                                scope = scope,
+                                onSignOutComplete = onSignedOut
+                            )
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = CrimsonAlert, contentColor = cyber.background),
                         modifier = Modifier.testTag("sign_out_button")

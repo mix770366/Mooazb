@@ -49,16 +49,22 @@ jobs:
             printf '%s' "${GOOGLE_SERVICES_JSON}" > app/google-services.json
           fi
 
+      - name: Cache Robolectric runtime jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-sdk-${{ runner.os }}-16-13921718-i7
+
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.3.1"
 
       - name: Run unit and Robolectric tests
-        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+        run: gradle :app:testDebugUnitTest --no-daemon --console=plain
 
       - name: Assemble Debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:assembleDebug --no-daemon --console=plain
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4

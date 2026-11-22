@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 
 plugins {
   alias(libs.plugins.android.application)
@@ -63,7 +64,22 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all { test ->
+        test.systemProperty(
+          "robolectric.dependency.repo.url",
+          "https://maven-central.storage-download.googleapis.com/maven2"
+        )
+        test.systemProperty("robolectric.dependency.repo.id", "mavenCentralMirror")
+        test.testLogging {
+          events("passed", "skipped", "failed")
+          exceptionFormat = TestExceptionFormat.FULL
+        }
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

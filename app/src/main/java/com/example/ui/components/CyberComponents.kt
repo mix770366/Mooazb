@@ -317,7 +317,7 @@ fun TokenCapacityGauge(
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -327,39 +327,50 @@ fun TokenCapacityGauge(
                 Text(
                     text = strings.contextWindowTitle,
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "$formatted / 1,000,000",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontFamily = JetBrainsMonoFontFamily,
+                    color = cyber.accent,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.testTag("token_capacity_counter")
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(50)),
+                    color = if (progress > 0.85f) ComputeAmber else cyber.accent,
+                    trackColor = cyber.surfaceElevated
+                )
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = DeepEmeraldContainer
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = DeepEmeraldContainer
-                    ) {
-                        Text(
-                            text = strings.implicitCacheBadge,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = SecurityEmerald,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
                     Text(
-                        text = "$formatted / 1,000,000",
+                        text = strings.implicitCacheBadge,
                         style = MaterialTheme.typography.labelSmall,
-                        color = cyber.accent
+                        color = SecurityEmerald,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
             }
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(5.dp)
-                    .clip(RoundedCornerShape(50)),
-                color = if (progress > 0.85f) ComputeAmber else cyber.accent,
-                trackColor = cyber.surfaceElevated
-            )
         }
     }
 }

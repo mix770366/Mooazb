@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -25,6 +26,9 @@ import com.example.core.LocalCoreStrings
 import com.example.domain.ReasoningLevel
 import com.example.ui.auth.AuthScreen
 import com.example.ui.components.ReasoningTierSegmentedControl
+import com.example.ui.components.TokenCapacityGauge
+import com.example.ui.screens.ChatScreen
+import com.example.ui.viewmodel.ChatViewModel
 import com.example.ui.theme.CoreMindTheme
 import com.example.ui.theme.LocalCyberPalette
 import com.example.ui.theme.cyberPaletteForTier
@@ -166,6 +170,7 @@ class ExampleRobolectricTest {
         }
 
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("auth_brand_logo").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("engine_error_banner").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("error_banner_copy_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("51:8D:04:1F", substring = true).assertIsDisplayed()
@@ -173,5 +178,48 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("error_banner_dismiss_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("engine_error_banner").assertDoesNotExist()
+    }
+
+    @Test
+    fun `token capacity gauge displays counter and badge on single lines in Arabic RTL`() {
+        composeTestRule.setContent {
+            CoreMindTheme {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    LocalAppLanguage provides AppLanguage.AR,
+                    LocalCoreStrings provides ArabicStrings,
+                    LocalLayoutDirection provides LayoutDirection.Rtl
+                ) {
+                    TokenCapacityGauge(usedTokens = 356L)
+                }
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("token_capacity_counter").assertIsDisplayed()
+        composeTestRule.onNodeWithText("356 / 1,000,000").assertIsDisplayed()
+        composeTestRule.onNodeWithText(ArabicStrings.implicitCacheBadge).assertIsDisplayed()
+    }
+
+    @Test
+    fun `chat screen displays empty starter suggestions and composer controls`() {
+        val chatViewModel = ChatViewModel()
+        composeTestRule.setContent {
+            CoreMindTheme {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    LocalAppLanguage provides AppLanguage.EN,
+                    LocalCoreStrings provides EnglishStrings,
+                    LocalLayoutDirection provides LayoutDirection.Ltr
+                ) {
+                    ChatScreen(viewModel = chatViewModel)
+                }
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("chat_empty_state").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("chat_suggestion_0").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("chat_message_input").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("chat_send_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("chat_clear_button").assertIsDisplayed()
     }
 }

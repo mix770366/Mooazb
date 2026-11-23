@@ -14,6 +14,7 @@ data class CoreStrings(
     val appTitle: String,
     val appSubtitle: String,
     val navWorkspace: String,
+    val navChat: String,
     val navIdeBridge: String,
     val navAgents: String,
     val navCodeLab: String,
@@ -106,13 +107,23 @@ data class CoreStrings(
     val grantPermission: String,
     val copyError: String,
     val authSignInFailedPrefix: String,
-    val authCancelledHint: String
+    val authCancelledHint: String,
+    val chatHeaderTitle: String,
+    val chatHeaderSubtitle: String,
+    val chatEmptyTitle: String,
+    val chatInputPlaceholder: String,
+    val chatClear: String,
+    val chatThinking: String,
+    val chatSuggestion1: String,
+    val chatSuggestion2: String,
+    val chatSuggestion3: String
 )
 
 val ArabicStrings = CoreStrings(
     appTitle = "Mooazb AI",
-    appSubtitle = "نواة معرفية فائقة السرعة · سياق المليون رمز",
+    appSubtitle = "نواة ذكاء اصطناعي · سياق 1M",
     navWorkspace = "المساحة",
+    navChat = "الدردشة",
     navIdeBridge = "الـ IDE",
     navAgents = "الوكلاء",
     navCodeLab = "الأكواد",
@@ -205,13 +216,23 @@ val ArabicStrings = CoreStrings(
     grantPermission = "منح الإذن",
     copyError = "نسخ التفاصيل",
     authSignInFailedPrefix = "تعذر إتمام تسجيل الدخول عبر Google",
-    authCancelledHint = "إذا اخترت حساباً ثم عادت الشاشة دون تسجيل الدخول، تأكد من تطابق بصمة SHA-1 في Firebase Console مع بصمة التطبيق:"
+    authCancelledHint = "إذا اخترت حساباً ثم عادت الشاشة دون تسجيل الدخول، تأكد من تطابق بصمة SHA-1 في Firebase Console مع بصمة التطبيق:",
+    chatHeaderTitle = "الدردشة المباشرة (Gemini)",
+    chatHeaderSubtitle = "تفاعل فوري متدفق مدعوم بمكتبة Firebase AI",
+    chatEmptyTitle = "ابدأ محادثة ذكية مع Gemini",
+    chatInputPlaceholder = "اكتب رسالتك أو اسأل Mooazb AI...",
+    chatClear = "مسح",
+    chatThinking = "جارٍ التحليل والكتابة...",
+    chatSuggestion1 = "اشرح لي كيفية تحسين أداء تطبيق Kotlin Compose.",
+    chatSuggestion2 = "اكتب دالة آمنة للاتصال بقاعدة بيانات مع معالجة الأخطاء.",
+    chatSuggestion3 = "لخّص أفضل ممارسات الأمان في تطبيقات أندرويد الحديثة."
 )
 
 val EnglishStrings = CoreStrings(
     appTitle = "Mooazb AI",
-    appSubtitle = "Ultra-Fast Cognitive Engine · 1M Token Context",
+    appSubtitle = "Cognitive Engine · 1M Context",
     navWorkspace = "Workspace",
+    navChat = "Chat",
     navIdeBridge = "IDE Bridge",
     navAgents = "Agents",
     navCodeLab = "Code Lab",
@@ -304,7 +325,16 @@ val EnglishStrings = CoreStrings(
     grantPermission = "Allow",
     copyError = "Copy Details",
     authSignInFailedPrefix = "Google Sign-In did not complete",
-    authCancelledHint = "If you picked an account and returned here without signing in, verify this app SHA-1 is registered in Firebase Console:"
+    authCancelledHint = "If you picked an account and returned here without signing in, verify this app SHA-1 is registered in Firebase Console:",
+    chatHeaderTitle = "Live Gemini Chat",
+    chatHeaderSubtitle = "Interactive streaming powered by Firebase AI",
+    chatEmptyTitle = "Start a live conversation with Gemini",
+    chatInputPlaceholder = "Type a message or ask Mooazb AI...",
+    chatClear = "Clear",
+    chatThinking = "Thinking...",
+    chatSuggestion1 = "Explain how to optimize recompositions in Jetpack Compose.",
+    chatSuggestion2 = "Write a coroutine-safe Kotlin helper with timeout handling.",
+    chatSuggestion3 = "Summarize Android security best practices for mobile apps."
 )
 
 val LocalCoreStrings = staticCompositionLocalOf { ArabicStrings }

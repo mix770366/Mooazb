@@ -24,6 +24,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -117,6 +119,7 @@ import kotlinx.coroutines.withContext
 private const val MAX_ATTACHMENT_BYTES = 20L * 1024L * 1024L
 private const val MAX_IMAGE_EDGE_PX = 1536
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun WorkspaceScreen(
     viewModel: WorkspaceViewModel,
@@ -427,6 +430,7 @@ fun WorkspaceScreen(
                 EngineErrorBanner(
                     message = errState.message,
                     isXHighBillingIssue = errState.isXHighBillingIssue,
+                    showCopyAction = true,
                     onFallbackToHigh = {
                         viewModel.setReasoningLevel(ReasoningLevel.HIGH)
                         viewModel.clearError()
@@ -520,12 +524,10 @@ fun WorkspaceScreen(
                 border = BorderStroke(1.dp, cyber.border)
             ) {
                 Column(modifier = Modifier.padding(10.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         OutlinedButton(
                             onClick = {

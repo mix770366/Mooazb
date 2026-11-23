@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Code
@@ -99,6 +101,7 @@ import com.example.ui.auth.signOutUser
 import com.example.ui.components.ReasoningLevelSheet
 import com.example.ui.components.ReasoningTierPill
 import com.example.ui.screens.AgentsScreen
+import com.example.ui.screens.ChatScreen
 import com.example.ui.screens.CodeMathScreen
 import com.example.ui.screens.HistoryScreen
 import com.example.ui.screens.IdeBridgeScreen
@@ -107,6 +110,7 @@ import com.example.ui.theme.CoreMindTheme
 import com.example.ui.theme.CrimsonAlert
 import com.example.ui.theme.LocalCyberPalette
 import com.example.ui.viewmodel.AgentsViewModel
+import com.example.ui.viewmodel.ChatViewModel
 import com.example.ui.viewmodel.HistoryViewModel
 import com.example.ui.viewmodel.IdeBridgeViewModel
 import com.example.ui.viewmodel.WorkspaceViewModel
@@ -122,6 +126,7 @@ import kotlinx.coroutines.flow.callbackFlow
 
 enum class AppTab {
     WORKSPACE,
+    CHAT,
     IDE_BRIDGE,
     AGENTS,
     CODE_LAB,
@@ -255,6 +260,8 @@ private fun AuthenticatedCoreShell(
         }
     )
 
+    val chatViewModel: ChatViewModel = viewModel(key = "chat_$uid")
+
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.WORKSPACE) }
     var showReasoningSheet by remember { mutableStateOf(false) }
     var showAccountDialog by remember { mutableStateOf(false) }
@@ -267,6 +274,7 @@ private fun AuthenticatedCoreShell(
 
     val navItems = listOf(
         NavTabItem(AppTab.WORKSPACE, strings.navWorkspace, Icons.Filled.Psychology, Icons.Outlined.Psychology),
+        NavTabItem(AppTab.CHAT, strings.navChat, Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat),
         NavTabItem(AppTab.IDE_BRIDGE, strings.navIdeBridge, Icons.Filled.Terminal, Icons.Outlined.Terminal),
         NavTabItem(AppTab.AGENTS, strings.navAgents, Icons.Filled.Hub, Icons.Outlined.Hub),
         NavTabItem(AppTab.CODE_LAB, strings.navCodeLab, Icons.Filled.Code, Icons.Outlined.Code),
@@ -454,6 +462,11 @@ private fun AuthenticatedCoreShell(
                         AppTab.WORKSPACE -> WorkspaceScreen(
                             viewModel = workspaceViewModel,
                             onOpenReasoningPicker = { showReasoningSheet = true }
+                        )
+                        AppTab.CHAT -> ChatScreen(
+                            viewModel = chatViewModel,
+                            activeReasoningLevel = activeReasoningLevel,
+                            onFallbackToHigh = { workspaceViewModel.setReasoningLevel(ReasoningLevel.HIGH) }
                         )
                         AppTab.IDE_BRIDGE -> IdeBridgeScreen(
                             viewModel = ideBridgeViewModel,

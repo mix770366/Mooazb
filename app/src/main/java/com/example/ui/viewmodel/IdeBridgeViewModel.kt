@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.random.Random
 
 private const val TAG = "IdeBridgeViewModel"
@@ -219,24 +221,24 @@ class IdeBridgeViewModel(
 
     fun buildBridgeConfigJson(workspace: IdeWorkspace): String {
         val ide = IdeType.fromString(workspace.ideType)
-        return """
-            {
-              "bridge": "coremind-firestore-v1",
-              "ide": "${ide.name}",
-              "extensionId": "${ide.extensionId}",
-              "workspaceId": "${workspace.id}",
-              "pairingCode": "${workspace.pairingCode}",
-              "project": "${workspace.projectName}",
-              "branch": "${workspace.branchName}",
-              "firebase": {
-                "projectId": "$projectId",
-                "databaseId": "$databaseId",
-                "userId": "$currentUserId",
-                "tasksCollection": "users/$currentUserId/ideTasks",
-                "workspacesCollection": "users/$currentUserId/ideWorkspaces"
-              },
-              "capabilities": ["diagnostics_sync", "unified_diff_queue", "agent_handoff"]
-            }
-        """.trimIndent()
+        val firebaseObj = JSONObject().apply {
+            put("projectId", projectId)
+            put("databaseId", databaseId)
+            put("userId", currentUserId)
+            put("tasksCollection", "users/$currentUserId/ideTasks")
+            put("workspacesCollection", "users/$currentUserId/ideWorkspaces")
+        }
+        val capabilities = JSONArray(listOf("diagnostics_sync", "unified_diff_queue", "agent_handoff"))
+        return JSONObject().apply {
+            put("bridge", "coremind-firestore-v1")
+            put("ide", ide.name)
+            put("extensionId", ide.extensionId)
+            put("workspaceId", workspace.id)
+            put("pairingCode", workspace.pairingCode)
+            put("project", workspace.projectName)
+            put("branch", workspace.branchName)
+            put("firebase", firebaseObj)
+            put("capabilities", capabilities)
+        }.toString(2)
     }
 }

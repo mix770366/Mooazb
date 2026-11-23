@@ -60,6 +60,8 @@ class AgentsViewModel(
                 initialValue = UiState.Loading
             )
 
+    private var activeWorkflowJob: kotlinx.coroutines.Job? = null
+
     fun selectPreset(preset: WorkflowPresetType) {
         _selectedPreset.value = preset
     }
@@ -90,13 +92,16 @@ class AgentsViewModel(
                     injectionRiskScore = audit.riskScore,
                     securityNotes = audit.notes,
                     steps = emptyList()
-                )
+                ).onFailure { err ->
+                    Log.w(TAG, "Failed to log blocked workflow run", err)
+                }
             }
             _executionState.value = UiState.Error(audit.notes)
             return
         }
 
-        viewModelScope.launch {
+        activeWorkflowJob?.cancel()
+        activeWorkflowJob = viewModelScope.launch {
             _executionState.value = UiState.Loading
             try {
                 val steps = aiRepository.planAgenticWorkflow(

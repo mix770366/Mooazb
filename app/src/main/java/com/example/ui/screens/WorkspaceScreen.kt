@@ -2,21 +2,14 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
 import android.media.MediaRecorder
-import android.net.Uri
+import android.media.projection.MediaProjectionManager
 import android.os.Build
-import android.provider.OpenableColumns
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -31,7 +24,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -50,6 +42,8 @@ import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.PresentToAll
+import androidx.compose.material.icons.outlined.StopScreenShare
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -68,6 +62,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -87,10 +82,19 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.core.LocalAppLanguage
 import com.example.core.LocalCoreStrings
+import com.example.core.MAX_ATTACHMENT_BYTES
+import com.example.core.ScreenShareCoordinator
+import com.example.core.bitmapToScreenAttachment
+import com.example.core.cleanupStaleVoiceCacheFiles
+import com.example.core.findActivity
+import com.example.core.openAppPermissionSettings
+import com.example.core.readUriAsAttachment
 import com.example.domain.ContextAttachment
 import com.example.domain.MessageRole
 import com.example.domain.ReasoningLevel
@@ -105,19 +109,16 @@ import com.example.ui.theme.ComputeAmber
 import com.example.ui.theme.CrimsonAlert
 import com.example.ui.theme.DeepAmberContainer
 import com.example.ui.theme.DeepCrimsonContainer
+import com.example.ui.theme.DeepEmeraldContainer
 import com.example.ui.theme.LocalCyberPalette
 import com.example.ui.theme.SecurityEmerald
 import com.example.ui.viewmodel.WorkspaceViewModel
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-private const val MAX_ATTACHMENT_BYTES = 20L * 1024L * 1024L
-private const val MAX_IMAGE_EDGE_PX = 1536
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -136,11 +137,13 @@ fun WorkspaceScreen(
     val attachments by viewModel.attachments.collectAsStateWithLifecycle()
     val generationState by viewModel.generationState.collectAsStateWithLifecycle()
     val securityNotice by viewModel.securityNotice.collectAsStateWithLifecycle()
+    val screenShareState by ScreenShareCoordinator.state.collectAsStateWithLifecycle()
 
     var promptText by rememberSaveable { mutableStateOf("") }
+    var showAddonsMenu by rememberSaveable { mutableStateOf(false) }
     var localPickerError by remember { mutableStateOf<String?>(null) }
     var isRecording by remember { mutableStateOf(false) }
-    var recordingSeconds by remember { mutableStateOf(0) }
+    var recordingSeconds by remember { mutableIntStateOf(0) }
     var showMicRationale by remember { mutableStateOf(false) }
     var micDeniedPermanently by remember { mutableStateOf(false) }
     var activeRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -148,13 +151,14 @@ fun WorkspaceScreen(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { cleanupStaleVoiceCacheFiles(context.cacheDir) }
+    }
+
     fun releaseRecorderSafely() {
         try {
             activeRecorder?.apply {
-                try {
-                    stop()
-                } catch (_: Exception) {
-                }
+                runCatching { stop() }
                 reset()
                 release()
             }
@@ -232,7 +236,10 @@ fun WorkspaceScreen(
                 }
             }
             attachmentResult
-                .onSuccess { viewModel.addAttachment(it) }
+                .onSuccess {
+                    viewModel.addAttachment(it)
+                    showAddonsMenu = false
+                }
                 .onFailure { localPickerError = it.message }
         }
     }
@@ -274,10 +281,30 @@ fun WorkspaceScreen(
         }
     }
 
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    val screenCaptureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == Activity.RESULT_OK && data != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            ScreenShareCoordinator.start(context, result.resultCode, data)
+            showAddonsMenu = false
+        }
+    }
+
     val mediaPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
+            showAddonsMenu = false
             coroutineScope.launch {
                 readUriAsAttachment(context, uri, isMedia = true, strings.fileTooLargeError)
                     .onSuccess { viewModel.addAttachment(it) }
@@ -290,6 +317,7 @@ fun WorkspaceScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
+            showAddonsMenu = false
             coroutineScope.launch {
                 readUriAsAttachment(context, uri, isMedia = false, strings.fileTooLargeError)
                     .onSuccess { viewModel.addAttachment(it) }
@@ -352,6 +380,46 @@ fun WorkspaceScreen(
                 selectedLevel = reasoningLevel,
                 onSelect = { viewModel.setReasoningLevel(it) }
             )
+
+            AnimatedVisibility(visible = screenShareState.isSharing) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = DeepEmeraldContainer.copy(alpha = 0.7f),
+                    border = BorderStroke(1.dp, SecurityEmerald.copy(alpha = 0.75f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = strings.screenSharingActive,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = SecurityEmerald,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = {
+                                screenShareState.latestFrame?.takeIf { !it.isRecycled }?.let { bmp ->
+                                    viewModel.addAttachment(bitmapToScreenAttachment(bmp))
+                                }
+                            },
+                            enabled = screenShareState.latestFrame != null
+                        ) {
+                            Text(strings.attachCurrentScreen, color = cyber.accent)
+                        }
+                        IconButton(
+                            onClick = { ScreenShareCoordinator.stop(context) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Icon(Icons.Outlined.StopScreenShare, contentDescription = strings.stopScreenShare, tint = CrimsonAlert, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
 
             securityNotice?.let { note ->
                 Surface(
@@ -517,17 +585,22 @@ fun WorkspaceScreen(
                 }
             }
 
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                color = cyber.surface,
-                border = BorderStroke(1.dp, cyber.border)
-            ) {
-                Column(modifier = Modifier.padding(10.dp)) {
+            // Expandable '+' Add-ons tray right above the composer input
+            AnimatedVisibility(visible = showAddonsMenu) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("workspace_addons_panel"),
+                    shape = RoundedCornerShape(16.dp),
+                    color = cyber.surfaceElevated,
+                    border = BorderStroke(1.dp, cyber.accent.copy(alpha = 0.45f))
+                ) {
                     FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
                             onClick = {
@@ -606,55 +679,120 @@ fun WorkspaceScreen(
                                 style = MaterialTheme.typography.labelLarge
                             )
                         }
+                        OutlinedButton(
+                            onClick = {
+                                if (screenShareState.isSharing) {
+                                    ScreenShareCoordinator.stop(context)
+                                } else {
+                                    runCatching {
+                                        val mgr = context.getSystemService(MediaProjectionManager::class.java)
+                                        screenCaptureLauncher.launch(mgr.createScreenCaptureIntent())
+                                    }.onFailure { localPickerError = it.localizedMessage }
+                                }
+                            },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("workspace_addon_screen_share"),
+                            border = BorderStroke(1.dp, if (screenShareState.isSharing) CrimsonAlert else SecurityEmerald.copy(alpha = 0.7f)),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (screenShareState.isSharing) DeepCrimsonContainer else DeepEmeraldContainer.copy(alpha = 0.45f),
+                                contentColor = if (screenShareState.isSharing) CrimsonAlert else SecurityEmerald
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (screenShareState.isSharing) Icons.Outlined.StopScreenShare else Icons.Outlined.PresentToAll,
+                                contentDescription = strings.shareScreen,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (screenShareState.isSharing) strings.stopScreenShare else strings.shareScreen,
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Sleek bottom composer bar: [+] | [Input Box] | [Send]
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                color = cyber.surface,
+                border = BorderStroke(1.dp, cyber.border)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilledIconButton(
+                        onClick = { showAddonsMenu = !showAddonsMenu },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .minimumInteractiveComponentSize()
+                            .testTag("workspace_add_button"),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = if (showAddonsMenu) cyber.accent else cyber.surfaceElevated,
+                            contentColor = if (showAddonsMenu) cyber.background else cyber.accent
+                        )
+                    ) {
+                        Icon(
+                            imageVector = if (showAddonsMenu) Icons.Outlined.Close else Icons.Outlined.Add,
+                            contentDescription = strings.addMenuLabel
+                        )
                     }
 
-                    Spacer(Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = promptText,
-                            onValueChange = { promptText = it },
-                            placeholder = {
-                                Text(
-                                    text = strings.workspacePlaceholder,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("workspace_prompt_input"),
-                            maxLines = 4,
-                            shape = RoundedCornerShape(14.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = cyber.accent,
-                                unfocusedBorderColor = cyber.border,
-                                focusedContainerColor = cyber.background,
-                                unfocusedContainerColor = cyber.background
+                    OutlinedTextField(
+                        value = promptText,
+                        onValueChange = { promptText = it },
+                        placeholder = {
+                            Text(
+                                text = if (isRecording) "${strings.recordingInProgress} (${recordingSeconds}s)" else strings.workspacePlaceholder,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("workspace_prompt_input"),
+                        maxLines = 4,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = cyber.accent,
+                            unfocusedBorderColor = cyber.border,
+                            focusedContainerColor = cyber.background,
+                            unfocusedContainerColor = cyber.background
                         )
-                        FilledIconButton(
-                            onClick = {
-                                val textToSend = promptText
+                    )
+
+                    FilledIconButton(
+                        onClick = {
+                            val textToSend = promptText
+                            if (screenShareState.isSharing && screenShareState.latestFrame != null && attachments.none { it.name.startsWith("screen_") }) {
+                                viewModel.addAttachment(bitmapToScreenAttachment(screenShareState.latestFrame!!))
+                            }
+                            if (viewModel.sendWorkspacePrompt(textToSend, language.code)) {
                                 promptText = ""
-                                viewModel.sendWorkspacePrompt(textToSend, language.code)
-                            },
-                            enabled = generationState !is UiState.Loading && generationState !is UiState.Streaming &&
-                                (promptText.isNotBlank() || attachments.isNotEmpty()),
-                            modifier = Modifier
-                                .size(50.dp)
-                                .testTag("workspace_send_button"),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = cyber.accent,
-                                contentColor = cyber.background
-                            )
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = strings.send)
-                        }
+                            }
+                        },
+                        enabled = generationState !is UiState.Loading && generationState !is UiState.Streaming &&
+                            (promptText.isNotBlank() || attachments.isNotEmpty() || (screenShareState.isSharing && screenShareState.latestFrame != null)),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .minimumInteractiveComponentSize()
+                            .testTag("workspace_send_button"),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = cyber.accent,
+                            contentColor = cyber.background
+                        )
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = strings.send)
                     }
                 }
             }
@@ -725,7 +863,7 @@ private fun AttachmentChip(attachment: ContextAttachment, onRemove: () -> Unit) 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            if (attachment.bitmap != null) {
+            if (attachment.bitmap != null && !attachment.bitmap.isRecycled) {
                 Image(
                     bitmap = attachment.bitmap.asImageBitmap(),
                     contentDescription = attachment.name,
@@ -848,107 +986,4 @@ fun splitTextAndCodeBlocks(raw: String): List<Pair<Boolean, String>> {
     }
     if (result.isEmpty()) result.add(false to raw)
     return result
-}
-
-private suspend fun readUriAsAttachment(
-    context: Context,
-    uri: Uri,
-    isMedia: Boolean,
-    tooLargeMsg: String
-): Result<ContextAttachment> = withContext(Dispatchers.IO) {
-    try {
-        val resolver = context.contentResolver
-        val mime = resolver.getType(uri) ?: if (isMedia) "image/jpeg" else "text/plain"
-        var displayName = "attachment"
-        var byteSize = 0L
-        resolver.query(uri, null, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
-                if (nameIdx >= 0) displayName = cursor.getString(nameIdx) ?: displayName
-                if (sizeIdx >= 0) byteSize = cursor.getLong(sizeIdx)
-            }
-        }
-        if (byteSize > MAX_ATTACHMENT_BYTES) {
-            return@withContext Result.failure(IllegalArgumentException(tooLargeMsg))
-        }
-
-        val bytes = resolver.openInputStream(uri)?.use { input ->
-            val out = ByteArrayOutputStream()
-            val buffer = ByteArray(16 * 1024)
-            var total = 0L
-            while (true) {
-                val read = input.read(buffer)
-                if (read == -1) break
-                total += read
-                if (total > MAX_ATTACHMENT_BYTES) {
-                    return@withContext Result.failure(IllegalArgumentException(tooLargeMsg))
-                }
-                out.write(buffer, 0, read)
-            }
-            out.toByteArray()
-        } ?: return@withContext Result.failure(IllegalStateException("Cannot read selected file."))
-
-        val actualSize = if (byteSize > 0L) byteSize else bytes.size.toLong()
-        if (actualSize > MAX_ATTACHMENT_BYTES) {
-            return@withContext Result.failure(IllegalArgumentException(tooLargeMsg))
-        }
-
-        val isImage = mime.startsWith("image/")
-        val isText = mime.startsWith("text/") || mime == "application/json" ||
-            displayName.endsWith(".kt") || displayName.endsWith(".py") ||
-            displayName.endsWith(".ts") || displayName.endsWith(".js") ||
-            displayName.endsWith(".md") || displayName.endsWith(".csv")
-
-        val bitmap = if (isImage) {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            var sampleSize = 1
-            while (
-                (bounds.outWidth / sampleSize) > MAX_IMAGE_EDGE_PX ||
-                (bounds.outHeight / sampleSize) > MAX_IMAGE_EDGE_PX
-            ) {
-                sampleSize *= 2
-            }
-            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)
-        } else null
-        val textContent = if (isText) bytes.decodeToString() else null
-        val estimatedTokens = when {
-            textContent != null -> (textContent.length / 4L).coerceAtLeast(10L)
-            isImage -> 258L
-            else -> (actualSize / 512L).coerceAtLeast(512L)
-        }
-
-        Result.success(
-            ContextAttachment(
-                id = UUID.randomUUID().toString(),
-                name = displayName,
-                mimeType = mime,
-                sizeBytes = actualSize,
-                estimatedTokens = estimatedTokens,
-                textContent = textContent,
-                bitmap = bitmap,
-                mediaBytes = if (!isImage && !isText) bytes else null
-            )
-        )
-    } catch (e: Exception) {
-        Result.failure(e)
-    }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
-}
-
-private fun openAppPermissionSettings(context: Context) {
-    val intent = Intent(
-        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-        Uri.fromParts("package", context.packageName, null)
-    ).apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    context.startActivity(intent)
 }

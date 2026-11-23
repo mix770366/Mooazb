@@ -77,14 +77,15 @@ fun CodeMathScreen(
             """.trimIndent()
         )
     }
+    val defaultArObjective = "احسب نسبة التحسن في الإنتاجية وانخفاض معدل الأخطاء عبر الأرباع الثلاثة."
+    val defaultEnObjective = "Compute throughput growth rate and error reduction across all three quarters."
     var objective by rememberSaveable {
-        mutableStateOf(
-            if (language.code == "ar") {
-                "احسب نسبة التحسن في الإنتاجية وانخفاض معدل الأخطاء عبر الأرباع الثلاثة."
-            } else {
-                "Compute throughput growth rate and error reduction across all three quarters."
-            }
-        )
+        mutableStateOf(if (language.code == "ar") defaultArObjective else defaultEnObjective)
+    }
+    androidx.compose.runtime.LaunchedEffect(language.code) {
+        if (objective == defaultArObjective || objective == defaultEnObjective) {
+            objective = if (language.code == "ar") defaultArObjective else defaultEnObjective
+        }
     }
 
     Box(

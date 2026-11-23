@@ -3,6 +3,8 @@ package com.example.ui.components
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -30,10 +32,14 @@ import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -42,6 +48,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -52,6 +59,9 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,7 +73,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.core.LocalCoreStrings
+import com.example.core.firebaseAppCheckConsoleUrl
+import com.example.core.isAppCheckErrorMessage
+import com.example.core.readLocalAppCheckDebugSecret
+import com.example.core.saveAndApplyCustomAppCheckDebugSecret
 import com.example.domain.ReasoningLevel
 import com.example.domain.SecurityStatus
 import com.example.ui.theme.ComputeAmber
@@ -333,15 +348,17 @@ fun TokenCapacityGauge(
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "$formatted / 1,000,000",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontFamily = JetBrainsMonoFontFamily,
-                    color = cyber.accent,
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier.testTag("token_capacity_counter")
-                )
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Text(
+                        text = "$formatted / 1,000,000",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = JetBrainsMonoFontFamily,
+                        color = cyber.accent,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.testTag("token_capacity_counter")
+                    )
+                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -536,6 +553,16 @@ fun EngineErrorBanner(
 ) {
     val context = LocalContext.current
     val strings = LocalCoreStrings.current
+    val cyber = LocalCyberPalette.current
+    val isAppCheckError = remember(message) { isAppCheckErrorMessage(message) }
+    var localDebugToken by remember(message, isAppCheckError) {
+        mutableStateOf(
+            if (BuildConfig.DEBUG && isAppCheckError) readLocalAppCheckDebugSecret(context) else null
+        )
+    }
+    var showTokenDialog by remember { mutableStateOf(false) }
+    var customTokenInput by remember { mutableStateOf("") }
+
     AnimatedVisibility(visible = message.isNotBlank()) {
         Surface(
             modifier = modifier
@@ -575,6 +602,95 @@ fun EngineErrorBanner(
                         }
                     }
                 }
+
+                if (BuildConfig.DEBUG && isAppCheckError) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = cyber.background.copy(alpha = 0.85f),
+                        border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.45f)),
+                        modifier = Modifier.testTag("app_check_recovery_panel")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = strings.appCheckRecoveryHint,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            localDebugToken?.let { token ->
+                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                    Text(
+                                        text = token,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontFamily = JetBrainsMonoFontFamily,
+                                        color = ElectricCyan,
+                                        modifier = Modifier.testTag("app_check_debug_token_text")
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (!localDebugToken.isNullOrBlank()) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            copyToClipboard(
+                                                context = context,
+                                                label = "Firebase App Check Debug Token",
+                                                text = localDebugToken.orEmpty(),
+                                                toastMessage = strings.copiedToast
+                                            )
+                                        },
+                                        border = BorderStroke(1.dp, ElectricCyan),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = ElectricCyan),
+                                        modifier = Modifier.testTag("app_check_copy_token_button")
+                                    ) {
+                                        Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(strings.appCheckCopyToken, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        runCatching {
+                                            val consoleIntent = Intent(
+                                                Intent.ACTION_VIEW,
+                                                Uri.parse(firebaseAppCheckConsoleUrl(context))
+                                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            context.startActivity(consoleIntent)
+                                        }
+                                    },
+                                    border = BorderStroke(1.dp, cyber.border),
+                                    modifier = Modifier.testTag("app_check_open_console_button")
+                                ) {
+                                    Icon(Icons.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(strings.appCheckOpenConsole, style = MaterialTheme.typography.labelMedium)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        customTokenInput = localDebugToken.orEmpty()
+                                        showTokenDialog = true
+                                    },
+                                    border = BorderStroke(1.dp, ComputeAmber.copy(alpha = 0.8f)),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ComputeAmber),
+                                    modifier = Modifier.testTag("app_check_set_token_button")
+                                ) {
+                                    Icon(Icons.Outlined.Key, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(strings.appCheckSetToken, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -629,6 +745,49 @@ fun EngineErrorBanner(
                 }
             }
         }
+    }
+
+    if (showTokenDialog) {
+        AlertDialog(
+            onDismissRequest = { showTokenDialog = false },
+            containerColor = cyber.surface,
+            title = {
+                Text(strings.appCheckTokenDialogTitle, style = MaterialTheme.typography.titleMedium)
+            },
+            text = {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    OutlinedTextField(
+                        value = customTokenInput,
+                        onValueChange = { customTokenInput = it },
+                        placeholder = { Text(strings.appCheckTokenPlaceholder) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("app_check_custom_token_input")
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (saveAndApplyCustomAppCheckDebugSecret(context, customTokenInput)) {
+                            localDebugToken = customTokenInput.trim()
+                            Toast.makeText(context, strings.appCheckTokenSaved, Toast.LENGTH_LONG).show()
+                            showTokenDialog = false
+                            onDismiss()
+                        }
+                    },
+                    enabled = customTokenInput.isNotBlank()
+                ) {
+                    Text(strings.saveAction)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTokenDialog = false }) {
+                    Text(strings.cancel)
+                }
+            }
+        )
     }
 }
 

@@ -108,6 +108,30 @@ class CognitiveAiRepository {
         )
     )
 
+    private val agentModels: Map<ReasoningLevel, GenerativeModel> by lazy {
+        ReasoningLevel.entries.associateWith { level ->
+            Firebase.ai.generativeModel(
+                modelName = level.modelName,
+                generationConfig = generationConfig {
+                    responseMimeType = "application/json"
+                    responseSchema = agentSchema
+                }
+            )
+        }
+    }
+
+    private val idePatchModels: Map<ReasoningLevel, GenerativeModel> by lazy {
+        ReasoningLevel.entries.associateWith { level ->
+            Firebase.ai.generativeModel(
+                modelName = level.modelName,
+                generationConfig = generationConfig {
+                    responseMimeType = "application/json"
+                    responseSchema = idePatchSchema
+                }
+            )
+        }
+    }
+
     private fun modelFor(level: ReasoningLevel): GenerativeModel = when (level) {
         ReasoningLevel.LOW -> lowModel
         ReasoningLevel.MEDIUM -> mediumModel
@@ -127,7 +151,6 @@ class CognitiveAiRepository {
     }
 
     internal fun buildNormalizedChatHistory(history: List<SessionMessage>): List<Content> {
-        // Ensure alternating user -> model pairs ending on "model" for startChat()
         val coalesced = mutableListOf<Pair<String, String>>()
         for (msg in history.takeLast(16)) {
             val role = if (MessageRole.fromString(msg.role) == MessageRole.USER) "user" else "model"
@@ -175,24 +198,25 @@ class CognitiveAiRepository {
         val userContent = content(role = "user") {
             text("$langDirective\n$reasoningDirective\n\n")
             attachments.forEach { attachment ->
+                val safeName = PromptInjectionShield.sanitizeAttachmentLabel(attachment.name)
                 when {
                     attachment.bitmap != null && attachment.sizeBytes <= MAX_INLINE_MEDIA_BYTES -> {
-                        text("[Attached Image: ${attachment.name}]\n")
+                        text("[Attached Image: $safeName]\n")
                         image(attachment.bitmap)
                     }
                     attachment.mediaBytes != null && attachment.sizeBytes <= MAX_INLINE_MEDIA_BYTES -> {
-                        text("[Attached Media: ${attachment.name} (${attachment.mimeType})]\n")
+                        text("[Attached Media: $safeName (${attachment.mimeType})]\n")
                         inlineData(attachment.mediaBytes, attachment.mimeType)
                     }
                     !attachment.textContent.isNullOrBlank() -> {
-                        text("[Attached Context File: ${attachment.name}]\n${attachment.textContent}\n\n")
+                        text("[Attached Context File: $safeName]\n${attachment.textContent}\n\n")
                     }
                 }
             }
             text(prompt)
         }
 
-        val stream = if (chatHistory.isNotEmpty() && attachments.none { it.bitmap != null || it.mediaBytes != null }) {
+        val stream = if (chatHistory.isNotEmpty()) {
             val chat = model.startChat(history = chatHistory)
             chat.sendMessageStream(userContent)
         } else {
@@ -215,13 +239,7 @@ class CognitiveAiRepository {
         reasoningLevel: ReasoningLevel,
         languageCode: String
     ): List<AgentStepRecord> {
-        val structuredModel = Firebase.ai.generativeModel(
-            modelName = reasoningLevel.modelName,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = agentSchema
-            }
-        )
+        val structuredModel = agentModels.getValue(reasoningLevel)
         val langPrompt = if (languageCode == "ar") {
             "Write step titles and outputs in Arabic (keeping technical roles and identifiers concise)."
         } else {
@@ -273,13 +291,7 @@ class CognitiveAiRepository {
         reasoningLevel: ReasoningLevel,
         languageCode: String
     ): IdePatchAnalysis {
-        val patchModel = Firebase.ai.generativeModel(
-            modelName = reasoningLevel.modelName,
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = idePatchSchema
-            }
-        )
+        val patchModel = idePatchModels.getValue(reasoningLevel)
         val explanationLang = if (languageCode == "ar") {
             "Write 'diagnosis' in Arabic, and keep 'unifiedDiff' strictly in valid unified diff syntax for $filePath."
         } else {

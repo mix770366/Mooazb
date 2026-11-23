@@ -17,6 +17,7 @@ import com.example.domain.UiState
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -77,6 +78,9 @@ class WorkspaceViewModel(
     private val _securityNotice = MutableStateFlow<String?>(null)
     val securityNotice: StateFlow<String?> = _securityNotice.asStateFlow()
 
+    private var activeGenerationJob: Job? = null
+    private var activeCodeMathJob: Job? = null
+
     val sessionsState: StateFlow<UiState<List<CognitiveSession>>> =
         syncRepository.observeSessions(currentUserId)
             .map<List<CognitiveSession>, UiState<List<CognitiveSession>>> { UiState.Success(it) }
@@ -134,12 +138,15 @@ class WorkspaceViewModel(
     }
 
     fun selectSession(session: CognitiveSession) {
+        activeGenerationJob?.cancel()
         _activeSessionId.value = session.id
         _reasoningLevel.value = ReasoningLevel.fromString(session.reasoningLevel)
         _generationState.value = UiState.Idle
+        _securityNotice.value = null
     }
 
     fun startNewSession() {
+        activeGenerationJob?.cancel()
         _activeSessionId.value = null
         _attachments.value = emptyList()
         _generationState.value = UiState.Idle
@@ -169,16 +176,17 @@ class WorkspaceViewModel(
         return (attachmentTokens + messageTokens + promptTokens).coerceIn(0L, 1_000_000L)
     }
 
-    fun sendWorkspacePrompt(rawPrompt: String, languageCode: String) {
+    fun sendWorkspacePrompt(rawPrompt: String, languageCode: String): Boolean {
         val trimmed = rawPrompt.trim()
-        if (trimmed.isEmpty() && _attachments.value.isEmpty()) return
+        if (trimmed.isEmpty() && _attachments.value.isEmpty()) return false
 
         val isArabic = languageCode == "ar"
         val combinedTextForAudit = buildString {
             append(trimmed)
             _attachments.value.forEach { att ->
+                append("\n").append(att.name)
                 if (!att.textContent.isNullOrBlank()) {
-                    append("\n").append(att.textContent.take(4000))
+                    append("\n").append(att.textContent)
                 }
             }
         }
@@ -186,7 +194,7 @@ class WorkspaceViewModel(
         if (audit.status == SecurityStatus.BLOCKED) {
             _securityNotice.value = null
             _generationState.value = UiState.Error(audit.notes)
-            return
+            return false
         } else if (audit.status == SecurityStatus.SANITIZED) {
             _securityNotice.value = audit.notes
         } else {
@@ -195,12 +203,14 @@ class WorkspaceViewModel(
 
         val currentAttachments = _attachments.value
         val activeLevel = _reasoningLevel.value
-        val effectivePrompt = trimmed.ifBlank {
+        val auditedPrompt = PromptInjectionShield.audit(trimmed, isArabic).sanitizedInput
+        val effectivePrompt = auditedPrompt.ifBlank {
             if (isArabic) "حلل الوسائط والملفات المرفقة بدقة." else "Analyze the attached media and context files."
         }
         val userTokens = (effectivePrompt.length / 4L + currentAttachments.sumOf { it.estimatedTokens }).coerceAtLeast(1L)
 
-        viewModelScope.launch {
+        activeGenerationJob?.cancel()
+        activeGenerationJob = viewModelScope.launch {
             _generationState.value = UiState.Loading
             val startTime = System.currentTimeMillis()
             try {
@@ -282,6 +292,7 @@ class WorkspaceViewModel(
                 )
             }
         }
+        return true
     }
 
     fun runCodeMathAnalysis(
@@ -292,7 +303,8 @@ class WorkspaceViewModel(
         if (codeOrTable.isBlank() && objective.isBlank()) return
         val level = _reasoningLevel.value
 
-        viewModelScope.launch {
+        activeCodeMathJob?.cancel()
+        activeCodeMathJob = viewModelScope.launch {
             _codeMathState.value = UiState.Loading
             val startTime = System.currentTimeMillis()
             val builder = StringBuilder()

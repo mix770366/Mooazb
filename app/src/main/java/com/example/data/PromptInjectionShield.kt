@@ -1,6 +1,7 @@
 package com.example.data
 
 import com.example.domain.SecurityStatus
+import java.text.Normalizer
 
 data class InjectionAuditResult(
     val status: SecurityStatus,
@@ -11,6 +12,9 @@ data class InjectionAuditResult(
 )
 
 object PromptInjectionShield {
+
+    private val zeroWidthRegex = Regex("[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]")
+    private val whitespaceNormalizeRegex = Regex("[\\t\\x0B\\f\\r]+")
 
     private val highRiskPatterns = listOf(
         "ignore_previous" to Regex("""(?i)(ignore|disregard|forget)\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts|rules)"""),
@@ -24,6 +28,15 @@ object PromptInjectionShield {
         "hidden_directive" to Regex("""(?i)(do\s+not\s+tell\s+the\s+user|silently\s+execute|bypass\s+permission)""")
     )
 
+    fun sanitizeAttachmentLabel(rawName: String): String {
+        val normalized = Normalizer.normalize(rawName, Normalizer.Form.NFKC)
+        return zeroWidthRegex.replace(normalized, "")
+            .replace(Regex("[\\r\\n\\[\\]]"), "_")
+            .trim()
+            .ifBlank { "attachment" }
+            .take(120)
+    }
+
     fun audit(rawInput: String, isArabic: Boolean): InjectionAuditResult {
         if (rawInput.isBlank()) {
             return InjectionAuditResult(
@@ -35,9 +48,12 @@ object PromptInjectionShield {
             )
         }
 
+        // Normalize full-width / lookalike forms and strip zero-width obfuscators before inspection
+        val nfkc = Normalizer.normalize(rawInput, Normalizer.Form.NFKC)
+        var sanitized = whitespaceNormalizeRegex.replace(zeroWidthRegex.replace(nfkc, ""), " ")
+
         val matched = mutableListOf<String>()
         var score = 0L
-        var sanitized = rawInput
 
         highRiskPatterns.forEach { (ruleName, regex) ->
             if (regex.containsMatchIn(sanitized)) {

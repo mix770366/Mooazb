@@ -39,23 +39,49 @@ jobs:
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
+          RESTORED=false
           if [ -n "${DEBUG_KEYSTORE_BASE64}" ]; then
-            printf '%s' "${DEBUG_KEYSTORE_BASE64}" | tr -d '\r\n' | base64 -d > debug.keystore
-            echo "Restored debug.keystore from DEBUG_KEYSTORE_BASE64 secret."
-          elif [ -f debug.keystore.base64 ]; then
-            tr -d '\r\n' < debug.keystore.base64 | base64 -d > debug.keystore
-            echo "Decoded debug.keystore from repository debug.keystore.base64."
-          elif [ ! -f debug.keystore ]; then
-            keytool -genkeypair \
-              -keystore debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-            echo "Generated ephemeral debug.keystore (set DEBUG_KEYSTORE_BASE64 secret for a fixed SHA-1)."
+            if python3 - <<'PY'
+          import base64, os, re, sys
+          raw = os.environ.get("DEBUG_KEYSTORE_BASE64", "")
+          cleaned = re.sub(r"\s+", "", raw)
+          if not cleaned:
+              sys.exit(1)
+          pad = (-len(cleaned)) % 4
+          cleaned += "=" * pad
+          data = base64.b64decode(cleaned, validate=True)
+          with open("debug.keystore", "wb") as f:
+              f.write(data)
+          PY
+            then
+              if keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey > /dev/null 2>&1; then
+                echo "Restored valid debug.keystore from DEBUG_KEYSTORE_BASE64 secret."
+                RESTORED=true
+              else
+                echo "::warning::DEBUG_KEYSTORE_BASE64 decoded, but is not a valid Android debug keystore (expected PKCS12 with alias androiddebugkey). Falling back."
+                rm -f debug.keystore
+              fi
+            else
+              echo "::warning::DEBUG_KEYSTORE_BASE64 secret is not valid Base64 (check for truncated paste or extra characters). Falling back."
+              rm -f debug.keystore
+            fi
+          fi
+          if [ "${RESTORED}" != "true" ]; then
+            if [ -f debug.keystore.base64 ]; then
+              tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore
+              echo "Decoded debug.keystore from repository debug.keystore.base64."
+            elif [ ! -f debug.keystore ]; then
+              keytool -genkeypair \
+                -keystore debug.keystore \
+                -storepass android \
+                -alias androiddebugkey \
+                -keypass android \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+              echo "Generated ephemeral debug.keystore (fix DEBUG_KEYSTORE_BASE64 secret for a fixed SHA-1)."
+            fi
           fi
           SHA1=$(keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep -E "^\s*SHA1:" | awk '{print $2}')
           SHA256=$(keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep -E "^\s*SHA256:" | awk '{print $2}')
@@ -65,8 +91,8 @@ jobs:
             echo "### Debug Signing Fingerprints"
             echo "- **SHA-1**: \`${SHA1}\`"
             echo "- **SHA-256**: \`${SHA256}\`"
-            if [ -z "${DEBUG_KEYSTORE_BASE64}" ] && [ ! -f debug.keystore.base64 ]; then
-              echo "- **Note**: Built with an ephemeral keystore. Add \`DEBUG_KEYSTORE_BASE64\` in GitHub Secrets (matching \`51:8D:04:1F:FC:14:41:D5:0B:A7:43:22:09:3F:71:4B:25:F1:13:EB\`) or register the SHA-1 above in Firebase Console for Google Sign-In."
+            if [ "${RESTORED}" != "true" ] && [ ! -f debug.keystore.base64 ]; then
+              echo "- **Note**: Built with an ephemeral keystore because \`DEBUG_KEYSTORE_BASE64\` was missing or invalid. Either update \`DEBUG_KEYSTORE_BASE64\` (exact Base64 from \`debug.keystore.base64\`, SHA-1 \`51:8D:04:1F:FC:14:41:D5:0B:A7:43:22:09:3F:71:4B:25:F1:13:EB\`) or register the SHA-1 above in Firebase Console."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

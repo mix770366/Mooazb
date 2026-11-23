@@ -431,23 +431,25 @@ fun AuthScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(190.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                    .height(210.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                ElectricCyan.copy(alpha = 0.16f),
+                                Color.Transparent
+                            )
+                        ),
+                        shape = RoundedCornerShape(24.dp)
+                    ),
+                contentAlignment = Alignment.Center
             ) {
                 Image(
-                    painter = painterResource(id = R.drawable.img_core_hero_1794931769011),
-                    contentDescription = strings.signInTitle,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-                Box(
+                    painter = painterResource(id = R.drawable.img_mooazb_logo),
+                    contentDescription = strings.appTitle,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, ObsidianBg.copy(alpha = 0.85f))
-                            )
-                        )
+                        .size(190.dp)
+                        .testTag("auth_brand_logo")
                 )
             }
 

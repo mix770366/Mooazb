@@ -3,6 +3,7 @@ package com.example.ui
 import android.app.Application
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -73,6 +74,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -288,21 +290,34 @@ private fun AuthenticatedCoreShell(
                             titleContentColor = MaterialTheme.colorScheme.onSurface
                         ),
                     title = {
-                        Column {
-                            Text(
-                                text = strings.appTitle,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.img_mooazb_logo),
+                                contentDescription = strings.appTitle,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("app_top_bar_logo")
                             )
-                            Text(
-                                text = strings.appSubtitle,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = cyber.accent,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Column {
+                                Text(
+                                    text = strings.appTitle,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = strings.appSubtitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = cyber.accent,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     },
                     actions = {

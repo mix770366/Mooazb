@@ -48,7 +48,6 @@ import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.PhotoLibrary
-import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
@@ -83,9 +82,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
 import com.example.core.LocalAppLanguage
 import com.example.core.LocalCoreStrings
 import com.example.domain.ContextAttachment
@@ -669,11 +670,19 @@ private fun EmptyWorkspaceStarter(onSelectPrompt: (String) -> Unit) {
             .padding(vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(Icons.Outlined.Psychology, contentDescription = null, tint = cyber.accent)
+            Image(
+                painter = painterResource(id = R.drawable.img_mooazb_logo),
+                contentDescription = strings.appTitle,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .size(88.dp)
+                    .testTag("workspace_empty_logo")
+            )
             Text(
                 text = strings.starterPromptsTitle,
                 style = MaterialTheme.typography.titleMedium,
